@@ -279,6 +279,13 @@ function ensureSurfaceSceneInit(){
   sun.position.set(60, 80, 40);
   surfaceScene.add(sun);
 
+  window.surfaceScene = surfaceScene;
+  window.surfaceCamera = surfaceCamera;
+  window.terrainHeight = terrainHeight;
+  window.surfaceRocksData = surfaceRocksData;
+  window.currentSurfaceSeed = currentSurfaceSeed;
+  window.surfacePos = surfacePos;
+
   surfaceInitialized = true;
 }
 
@@ -299,6 +306,10 @@ function buildSurfaceWorld(seed){
   surfaceScene.fog = new THREE.Fog(0xe3ab78, 45, 210);
 
   surfaceRocksGroup = scatterRocks(surfaceScene, seed, 160);
+
+  window.surfaceScene = surfaceScene;
+  window.surfaceRocksData = surfaceRocksData;
+  window.currentSurfaceSeed = seed;
 
   surfaceSunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glowTexture, color: 0xfff3d6, transparent: true,
@@ -506,13 +517,14 @@ function spawnStoryTarget(seed){
   surfaceScene.add(storyTargetGlow);
 
   storyTargetCollected = false;
+  window.storyTargetMesh = storyTargetMesh;
 
   // Calculate and display persistent terrain navigation guide ribbon
   if (window.NavigationGuide){
     NavigationGuide.calculatePath(
       { x: surfacePos.x, z: surfacePos.z },
       { x: x, z: z },
-      { seed: seed, obstacles: surfaceRocksData }
+      { scene: surfaceScene, seed: seed, obstacles: surfaceRocksData, terrainHeight: terrainHeight }
     );
   }
 }

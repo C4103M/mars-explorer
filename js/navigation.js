@@ -1,5 +1,5 @@
 /* =========================================================================
-   NAVIGATION GUIDE — Dynamic Pathfinding & Terrain Trajectory Ribbon
+   NAVIGATION GUIDE — Dynamic Pathfinding & Terrain Trajectory System
    Calculates an obstacle-avoiding route from player/start to any target,
    projects it seamlessly onto Martian terrain relief, and exposes
    query functions to measure the player's distance to the path.
@@ -10,13 +10,12 @@
 
   // State
   let pathPoints = [];           // Array of THREE.Vector3 conforming to terrain
-  let rawWaypoints = [];         // Key拐 points from pathfinder
-  let routeMesh = null;          // Three.js Ribbon Mesh
-  let trailParticles = null;     // Floating directional pulse indicators
+  let rawWaypoints = [];         // Key turn points from pathfinder
+  let routeGroup = null;         // Three.js Group containing ribbon, line & markers
   let trailTexture = null;
   let activeTarget = null;       // { x, z }
   let activeStart = null;        // { x, z }
-  let lastCalcTime = 0;
+  let currentScene = null;
   let animationTime = 0;
 
   /* -------------------- Procedural Flow Texture -------------------- */
@@ -27,33 +26,33 @@
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
 
-    // Background gradient with glowing center beam and lateral falloff
+    // High-contrast holographic cyan glow with bright center beam
     const grad = ctx.createLinearGradient(0, 0, 0, 64);
-    grad.addColorStop(0, 'rgba(0, 220, 255, 0)');
-    grad.addColorStop(0.2, 'rgba(0, 220, 255, 0.35)');
-    grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
-    grad.addColorStop(0.8, 'rgba(0, 220, 255, 0.35)');
-    grad.addColorStop(1, 'rgba(0, 220, 255, 0)');
+    grad.addColorStop(0.0, 'rgba(0, 180, 255, 0)');
+    grad.addColorStop(0.2, 'rgba(0, 210, 255, 0.45)');
+    grad.addColorStop(0.5, 'rgba(255, 255, 255, 1.0)');
+    grad.addColorStop(0.8, 'rgba(0, 210, 255, 0.45)');
+    grad.addColorStop(1.0, 'rgba(0, 180, 255, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 512, 64);
 
-    // Flow chevrons (> > >) pointing in direction of movement
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.lineWidth = 4;
+    // Directional Chevrons (> > >) pointing toward objective
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
     for (let x = 0; x < 512; x += 64){
       ctx.beginPath();
-      ctx.moveTo(x + 12, 14);
+      ctx.moveTo(x + 10, 12);
       ctx.lineTo(x + 36, 32);
-      ctx.lineTo(x + 12, 50);
+      ctx.lineTo(x + 10, 52);
       ctx.stroke();
 
-      // Soft glow dot in center of each chevron
-      ctx.fillStyle = 'rgba(79, 209, 255, 0.9)';
+      // Glowing core dot on apex
+      ctx.fillStyle = '#4fd1ff';
       ctx.beginPath();
-      ctx.arc(x + 36, 32, 5, 0, Math.PI * 2);
+      ctx.arc(x + 36, 32, 6, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -64,14 +63,13 @@
   }
 
   /* -------------------- Obstacle Collision Helpers -------------------- */
-  function lineIntersectsObstacle(p1, p2, obstacle, margin = 1.0){
-    const r = obstacle.radius + margin;
+  function lineIntersectsObstacle(p1, p2, obstacle, margin){
+    const r = obstacle.radius + (margin !== undefined ? margin : 0.85);
     const dx = p2.x - p1.x;
     const dz = p2.z - p1.z;
     const lenSq = dx * dx + dz * dz;
     if (lenSq === 0) return Math.hypot(p1.x - obstacle.x, p1.z - obstacle.z) < r;
 
-    // Projection of obstacle onto segment
     const t = Math.max(0, Math.min(1, ((obstacle.x - p1.x) * dx + (obstacle.z - p1.z) * dz) / lenSq));
     const projX = p1.x + t * dx;
     const projZ = p1.z + t * dz;
@@ -79,7 +77,7 @@
     return distSq < r * r;
   }
 
-  function isSegmentClear(p1, p2, obstacles, margin = 0.85){
+  function isSegmentClear(p1, p2, obstacles, margin){
     if (!obstacles || obstacles.length === 0) return true;
     for (let i = 0; i < obstacles.length; i++){
       if (lineIntersectsObstacle(p1, p2, obstacles[i], margin)) return false;
@@ -89,7 +87,7 @@
 
   /* -------------------- 2D A* Pathfinding around rocks -------------------- */
   function findObstacleFreePath(start, target, obstacles){
-    // 1. Direct path check (Fast path: if unobstructed, straight line suffices)
+    // 1. Direct path check (Fast path: if clear, straight line)
     if (isSegmentClear(start, target, obstacles, 0.9)){
       return [new THREE.Vector2(start.x, start.z), new THREE.Vector2(target.x, target.z)];
     }
@@ -100,7 +98,7 @@
     const minZ = Math.min(start.z, target.z) - 16;
     const maxZ = Math.max(start.z, target.z) + 16;
 
-    const cellSize = 1.2; // 1.2m cell grid resolution
+    const cellSize = 1.2;
     const cols = Math.ceil((maxX - minX) / cellSize);
     const rows = Math.ceil((maxZ - minZ) / cellSize);
 
@@ -112,7 +110,6 @@
     const key = (c, r) => `${c},${r}`;
     const blocked = new Set();
 
-    // Mark cells overlapping with any obstacle
     for (let i = 0; i < (obstacles || []).length; i++){
       const obs = obstacles[i];
       const radius = obs.radius + 0.85;
@@ -132,11 +129,9 @@
       }
     }
 
-    // Ensure start and target are not blocked
     blocked.delete(key(startCol, startRow));
     blocked.delete(key(targetCol, targetRow));
 
-    // A* search
     const openSet = [{ col: startCol, row: startRow, g: 0, f: Math.hypot(startCol - targetCol, startRow - targetRow) }];
     const cameFrom = new Map();
     const gScore = new Map();
@@ -193,7 +188,6 @@
       }
     }
 
-    // Reconstruct raw node path
     const rawNodes = [];
     if (foundTarget){
       let curr = { col: targetCol, row: targetRow };
@@ -204,11 +198,10 @@
       rawNodes[0] = new THREE.Vector2(start.x, start.z);
       rawNodes[rawNodes.length - 1] = new THREE.Vector2(target.x, target.z);
     } else {
-      // Fallback: direct line with midpoint detours if path wasn't found within iteration limits
       return [new THREE.Vector2(start.x, start.z), new THREE.Vector2(target.x, target.z)];
     }
 
-    // 3. String-pulling / Raycast Shortcut smoothing: skip unnecessary intermediate steps
+    // 3. String-pulling / Raycast Shortcut smoothing
     const smoothed = [rawNodes[0]];
     let anchorIdx = 0;
     while (anchorIdx < rawNodes.length - 1){
@@ -227,7 +220,7 @@
   }
 
   /* -------------------- Ribbon Geometry Generation -------------------- */
-  function buildTerrainRibbonGeometry(points3D, width = 0.55){
+  function buildTerrainRibbonGeometry(points3D, heightFn, seed, width = 0.75){
     const numPoints = points3D.length;
     if (numPoints < 2) return new THREE.BufferGeometry();
 
@@ -242,8 +235,6 @@
       dists.push(totalDist);
     }
 
-    const up = new THREE.Vector3(0, 1, 0);
-
     for (let i = 0; i < numPoints; i++){
       const curr = points3D[i];
       let dir;
@@ -255,23 +246,26 @@
         dir = points3D[i + 1].clone().sub(points3D[i - 1]).normalize();
       }
 
-      // Normal to direction on horizontal plane
+      // Lateral vector perpendicular to route direction
       const side = new THREE.Vector3(-dir.z, 0, dir.x).normalize().multiplyScalar(width * 0.5);
 
       const pLeft = curr.clone().add(side);
       const pRight = curr.clone().sub(side);
 
+      // Re-sample terrain height for each side vertex so slope never buries either side
+      const yLeft = (typeof heightFn === 'function') ? heightFn(pLeft.x, pLeft.z, seed) + 0.22 : curr.y + 0.22;
+      const yRight = (typeof heightFn === 'function') ? heightFn(pRight.x, pRight.z, seed) + 0.22 : curr.y + 0.22;
+
       const idx = i * 2;
       positions[idx * 3]     = pLeft.x;
-      positions[idx * 3 + 1] = pLeft.y;
+      positions[idx * 3 + 1] = yLeft;
       positions[idx * 3 + 2] = pLeft.z;
 
       positions[(idx + 1) * 3]     = pRight.x;
-      positions[(idx + 1) * 3 + 1] = pRight.y;
+      positions[(idx + 1) * 3 + 1] = yRight;
       positions[(idx + 1) * 3 + 2] = pRight.z;
 
-      // UVs: V runs 0 to 1 across width; U stretches along path length
-      const u = dists[i] * 0.7;
+      const u = dists[i] * 0.55;
       uvs[idx * 2]     = u;
       uvs[idx * 2 + 1] = 0.0;
 
@@ -302,101 +296,167 @@
 
     /**
      * Compute and render a path from `start` to `target`.
-     * Automatically projects onto terrain relief and avoids obstacles in `surfaceRocksData`.
+     * Automatically projects onto terrain relief and avoids obstacles.
      */
     calculatePath: function(start, target, opts = {}){
-      if (!window.surfaceScene) return [];
+      const scene = opts.scene || currentScene || window.surfaceScene;
+      if (!scene) return [];
+      currentScene = scene;
 
-      const startPt = start || (typeof surfacePos !== 'undefined' ? { x: surfacePos.x, z: surfacePos.z } : { x: 0, z: 0 });
-      const targetPt = target || (window.storyTargetMesh ? { x: storyTargetMesh.position.x, z: storyTargetMesh.position.z } : null);
+      const pPos = (typeof surfacePos !== 'undefined' ? surfacePos : (window.surfacePos || { x: 0, z: 0 }));
+      const startPt = start || { x: pPos.x, z: pPos.z };
+
+      const tMesh = opts.targetMesh || (typeof storyTargetMesh !== 'undefined' ? storyTargetMesh : window.storyTargetMesh);
+      const targetPt = target || (tMesh ? { x: tMesh.position.x, z: tMesh.position.z } : null);
 
       if (!targetPt) return [];
 
       activeStart = { x: startPt.x, z: startPt.z };
       activeTarget = { x: targetPt.x, z: targetPt.z };
 
-      const obstacles = opts.obstacles || window.surfaceRocksData || [];
-      const seed = opts.seed || window.currentSurfaceSeed || 1;
+      const obstacles = opts.obstacles || (typeof surfaceRocksData !== 'undefined' ? surfaceRocksData : (window.surfaceRocksData || []));
+      const seed = opts.seed || (typeof currentSurfaceSeed !== 'undefined' ? currentSurfaceSeed : (window.currentSurfaceSeed || 1));
+      const heightFn = opts.terrainHeight || (typeof terrainHeight === 'function' ? terrainHeight : window.terrainHeight);
 
-      // 1. Calculate optimal 2D node sequence avoiding rocks
+      // 1. Calculate optimal 2D node sequence avoiding obstacles
       rawWaypoints = findObstacleFreePath(activeStart, activeTarget, obstacles);
 
       // 2. Sample dense 3D points following terrain elevation
       pathPoints = [];
       if (rawWaypoints.length < 2){
+        const yStart = (typeof heightFn === 'function') ? heightFn(activeStart.x, activeStart.z, seed) + 0.22 : 0.22;
+        const yTarget = (typeof heightFn === 'function') ? heightFn(activeTarget.x, activeTarget.z, seed) + 0.22 : 0.22;
         pathPoints = [
-          new THREE.Vector3(activeStart.x, terrainHeight(activeStart.x, activeStart.z, seed) + 0.18, activeStart.z),
-          new THREE.Vector3(activeTarget.x, terrainHeight(activeTarget.x, activeTarget.z, seed) + 0.18, activeTarget.z)
+          new THREE.Vector3(activeStart.x, yStart, activeStart.z),
+          new THREE.Vector3(activeTarget.x, yTarget, activeTarget.z)
         ];
       } else {
-        // Build 3D points from waypoints
         const waypoints3D = rawWaypoints.map(wp => {
-          const y = typeof terrainHeight === 'function' ? terrainHeight(wp.x, wp.y, seed) : 0;
-          return new THREE.Vector3(wp.x, y + 0.18, wp.y);
+          const y = (typeof heightFn === 'function') ? heightFn(wp.x, wp.y, seed) + 0.22 : 0.22;
+          return new THREE.Vector3(wp.x, y, wp.y);
         });
 
-        // Spline interpolation for smooth curve
+        // Spline interpolation for smooth organic curve
         const curve = new THREE.CatmullRomCurve3(waypoints3D, false, 'centripetal', 0.4);
         const totalDist = waypoints3D.reduce((acc, pt, i) => i === 0 ? 0 : acc + pt.distanceTo(waypoints3D[i-1]), 0);
-        const sampleCount = Math.max(16, Math.ceil(totalDist / 0.55)); // Point every ~55cm
+        const sampleCount = Math.max(20, Math.ceil(totalDist / 0.5)); // Sample every ~50cm
         const sampledPoints = curve.getPoints(sampleCount);
 
-        // Ground each sampled point accurately to terrain surface
         pathPoints = sampledPoints.map(pt => {
-          const ty = typeof terrainHeight === 'function' ? terrainHeight(pt.x, pt.z, seed) : pt.y;
-          return new THREE.Vector3(pt.x, ty + 0.16, pt.z);
+          const ty = (typeof heightFn === 'function') ? heightFn(pt.x, pt.z, seed) + 0.22 : pt.y;
+          return new THREE.Vector3(pt.x, ty, pt.z);
         });
       }
 
-      this.renderRoute();
-      lastCalcTime = performance.now();
+      this.renderRoute(scene, heightFn, seed);
       return pathPoints;
     },
 
     /**
-     * Renders or updates the visual holographic ribbon in Three.js scene.
+     * Renders or updates the visual holographic ribbon + core line in Three.js scene.
      */
-    renderRoute: function(){
-      if (!window.surfaceScene) return;
+    renderRoute: function(targetScene, heightFn, seed){
+      const scene = targetScene || currentScene || window.surfaceScene;
+      if (!scene) return;
+      currentScene = scene;
 
-      if (routeMesh){
-        surfaceScene.remove(routeMesh);
-        if (routeMesh.geometry) routeMesh.geometry.dispose();
-        routeMesh = null;
+      if (routeGroup){
+        scene.remove(routeGroup);
+        routeGroup.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) child.material.dispose();
+        });
+        routeGroup = null;
       }
 
       if (!this.enabled || pathPoints.length < 2) return;
 
-      const texture = createTrailTexture();
-      const geo = buildTerrainRibbonGeometry(pathPoints, 0.52);
+      routeGroup = new THREE.Group();
+      routeGroup.name = 'NavigationGuideGroup';
 
-      const mat = new THREE.MeshBasicMaterial({
+      // 1. Holographic glowing ribbon with moving chevrons
+      const texture = createTrailTexture();
+      const geo = buildTerrainRibbonGeometry(pathPoints, heightFn, seed, 0.75);
+
+      const ribbonMat = new THREE.MeshBasicMaterial({
         map: texture,
         color: 0x4fd1ff,
         transparent: true,
-        opacity: 0.88,
+        opacity: 0.92,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4
+      });
+
+      const ribbonMesh = new THREE.Mesh(geo, ribbonMat);
+      ribbonMesh.renderOrder = 999;
+      routeGroup.add(ribbonMesh);
+
+      // 2. High-intensity center laser spine line
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(
+        pathPoints.map(p => new THREE.Vector3(p.x, p.y + 0.04, p.z))
+      );
+      const lineMat = new THREE.LineBasicMaterial({
+        color: 0xc8f5ff,
+        linewidth: 3,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const centerLine = new THREE.Line(lineGeo, lineMat);
+      centerLine.renderOrder = 1000;
+      routeGroup.add(centerLine);
+
+      // 3. Periodic waypoint pulse nodes every ~3.5 meters
+      const nodeGeo = new THREE.RingGeometry(0.12, 0.38, 16);
+      nodeGeo.rotateX(-Math.PI / 2);
+      const nodeMat = new THREE.MeshBasicMaterial({
+        color: 0xffd15c,
+        transparent: true,
+        opacity: 0.75,
         side: THREE.DoubleSide,
         depthWrite: false,
         blending: THREE.AdditiveBlending
       });
 
-      routeMesh = new THREE.Mesh(geo, mat);
-      routeMesh.renderOrder = 999; // Ensure it renders on top of the terrain
-      surfaceScene.add(routeMesh);
+      let distCounter = 0;
+      for (let i = 1; i < pathPoints.length; i++){
+        distCounter += pathPoints[i].distanceTo(pathPoints[i - 1]);
+        if (distCounter >= 3.5){
+          distCounter = 0;
+          const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
+          nodeMesh.position.copy(pathPoints[i]);
+          nodeMesh.position.y += 0.05;
+          nodeMesh.renderOrder = 1001;
+          routeGroup.add(nodeMesh);
+        }
+      }
+
+      scene.add(routeGroup);
     },
 
     /**
      * Call every frame to animate the flowing chevrons toward the objective.
      */
     update: function(dt){
-      animationTime += dt || 0.016;
+      const delta = dt || 0.016;
+      animationTime += delta;
+
       if (trailTexture){
-        // Speed of flowing pulse toward destination
-        trailTexture.offset.x -= (dt || 0.016) * 1.85;
+        trailTexture.offset.x -= delta * 1.85;
       }
-      if (routeMesh && routeMesh.material){
-        // Subtle breathing glow
-        routeMesh.material.opacity = 0.78 + Math.sin(animationTime * 3.5) * 0.14;
+
+      if (routeGroup){
+        const pulse = 0.78 + Math.sin(animationTime * 3.5) * 0.18;
+        routeGroup.children.forEach(child => {
+          if (child.material && child.material.opacity !== undefined){
+            child.material.opacity = pulse;
+          }
+        });
       }
     },
 
@@ -404,10 +464,14 @@
      * Force clear the route visual and geometry.
      */
     clear: function(){
-      if (routeMesh && window.surfaceScene){
-        surfaceScene.remove(routeMesh);
-        if (routeMesh.geometry) routeMesh.geometry.dispose();
-        routeMesh = null;
+      const scene = currentScene || window.surfaceScene;
+      if (routeGroup && scene){
+        scene.remove(routeGroup);
+        routeGroup.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) child.material.dispose();
+        });
+        routeGroup = null;
       }
       pathPoints = [];
       rawWaypoints = [];
@@ -438,7 +502,7 @@
      * Returns distance in meters.
      */
     getDistanceToPoint: function(pos){
-      const p = pos || (typeof surfacePos !== 'undefined' ? surfacePos : null);
+      const p = pos || (typeof surfacePos !== 'undefined' ? surfacePos : (window.surfacePos || null));
       if (!p || pathPoints.length < 2) return Infinity;
 
       let minDistanceSq = Infinity;
@@ -474,14 +538,14 @@
      * Shortcut for measuring current player distance from the route.
      */
     getDistanceToPlayer: function(){
-      return this.getDistanceToPoint(typeof surfacePos !== 'undefined' ? surfacePos : null);
+      return this.getDistanceToPoint(typeof surfacePos !== 'undefined' ? surfacePos : (window.surfacePos || null));
     },
 
     /**
      * Returns detailed proximity info: closest point on path, distance, and route progress (0.0 to 1.0).
      */
     getClosestPointOnPath: function(pos){
-      const p = pos || (typeof surfacePos !== 'undefined' ? surfacePos : null);
+      const p = pos || (typeof surfacePos !== 'undefined' ? surfacePos : (window.surfacePos || null));
       if (!p || pathPoints.length < 2){
         return { point: null, distance: Infinity, progress: 0 };
       }
@@ -520,7 +584,6 @@
         }
       }
 
-      // Calculate progress fraction along full path
       let distSoFar = 0;
       let totalDist = 0;
       for (let i = 0; i < pathPoints.length - 1; i++){
