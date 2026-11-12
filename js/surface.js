@@ -506,6 +506,15 @@ function spawnStoryTarget(seed){
   surfaceScene.add(storyTargetGlow);
 
   storyTargetCollected = false;
+
+  // Calculate and display persistent terrain navigation guide ribbon
+  if (window.NavigationGuide){
+    NavigationGuide.calculatePath(
+      { x: surfacePos.x, z: surfacePos.z },
+      { x: x, z: z },
+      { seed: seed, obstacles: surfaceRocksData }
+    );
+  }
 }
 
 function updateStoryTargetCheck(){
@@ -522,6 +531,7 @@ function updateStoryTargetCheck(){
 
   if (dist < 3 && !storyTargetCollected){
     storyTargetCollected = true;
+    if (window.NavigationGuide) NavigationGuide.clear();
     const statusEl = document.getElementById('story-target-status');
     const infoEl = document.getElementById('story-target-info');
     if (statusEl) statusEl.textContent = '✅ Sample collected successfully!';
@@ -630,6 +640,7 @@ function renderSurfaceFrame(){
   if (!missionComplete) updateSurfaceMovement(dt);
   updateStoryTargetCheck();
   checkLanderHover();
+  if (window.NavigationGuide) NavigationGuide.update(dt);
   renderer.render(surfaceScene, surfaceCamera);
 }
 
@@ -781,6 +792,7 @@ function enterSurfaceMode(opts){
 
 function exitSurfaceMode(){
   if (document.pointerLockElement) document.exitPointerLock();
+  if (window.NavigationGuide) NavigationGuide.clear();
   const promptEl = document.getElementById('lander-interact-prompt');
   if (promptEl) promptEl.classList.remove('visible');
   isHoveringLander = false;

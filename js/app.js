@@ -61,6 +61,7 @@ function setAppState(state){
 
 function goHome(){
   if (document.pointerLockElement) document.exitPointerLock();
+  if (window.NavigationGuide) NavigationGuide.clear();
   document.getElementById('story-briefing').style.display = 'none';
   document.getElementById('story-complete').style.display = 'none';
   const chapterModal = document.getElementById('chapter-complete-modal');
