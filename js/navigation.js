@@ -109,6 +109,7 @@
 
     const key = (c, r) => `${c},${r}`;
     const blocked = new Set();
+    const closedSet = new Set();
 
     for (let i = 0; i < (obstacles || []).length; i++){
       const obs = obstacles[i];
@@ -150,7 +151,7 @@
 
     let foundTarget = false;
     let iterations = 0;
-    const maxIterations = 3500;
+    const maxIterations = 2000;
 
     while (openSet.length > 0 && iterations++ < maxIterations){
       openSet.sort((a, b) => a.f - b.f);
@@ -162,20 +163,22 @@
         break;
       }
 
+      closedSet.add(currentKey);
+
       for (let i = 0; i < neighbors.length; i++){
         const n = neighbors[i];
         const nc = current.col + n.dc;
         const nr = current.row + n.dr;
         if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
         const nKey = key(nc, nr);
-        if (blocked.has(nKey)) continue;
+        if (blocked.has(nKey) || closedSet.has(nKey)) continue;
 
         const tentG = (gScore.get(currentKey) || 0) + n.cost;
         if (tentG < (gScore.get(nKey) || Infinity)){
           cameFrom.set(nKey, { col: current.col, row: current.row });
           gScore.set(nKey, tentG);
           const h = Math.hypot(nc - targetCol, nr - targetRow);
-          const f = tentG + h * 1.1;
+          const f = tentG + h * 1.05;
 
           const existing = openSet.find(o => o.col === nc && o.row === nr);
           if (existing){
@@ -191,9 +194,15 @@
     const rawNodes = [];
     if (foundTarget){
       let curr = { col: targetCol, row: targetRow };
+      const visitedBacktrack = new Set();
       while (curr){
+        const cKey = key(curr.col, curr.row);
+        if (visitedBacktrack.has(cKey)) break;
+        visitedBacktrack.add(cKey);
+
         rawNodes.unshift(new THREE.Vector2(minX + curr.col * cellSize, minZ + curr.row * cellSize));
-        curr = cameFrom.get(key(curr.col, curr.row));
+        if (curr.col === startCol && curr.row === startRow) break;
+        curr = cameFrom.get(cKey);
       }
       rawNodes[0] = new THREE.Vector2(start.x, start.z);
       rawNodes[rawNodes.length - 1] = new THREE.Vector2(target.x, target.z);
@@ -204,7 +213,8 @@
     // 3. String-pulling / Raycast Shortcut smoothing
     const smoothed = [rawNodes[0]];
     let anchorIdx = 0;
-    while (anchorIdx < rawNodes.length - 1){
+    let smoothSafety = 0;
+    while (anchorIdx < rawNodes.length - 1 && smoothSafety++ < 500){
       let furthest = anchorIdx + 1;
       for (let j = rawNodes.length - 1; j > anchorIdx + 1; j--){
         if (isSegmentClear(rawNodes[anchorIdx], rawNodes[j], obstacles, 0.75)){
