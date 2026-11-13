@@ -561,3 +561,31 @@ header{
   0%{transform:translate(-50%, 0) scale(1);box-shadow:0 0 12px rgba(79,209,255,0.35);}
   100%{transform:translate(-50%, 0) scale(1.04);box-shadow:0 0 24px rgba(79,209,255,0.75);}
 }
+
+/* Terrain Preset Selector */
+.terrain-selector-wrap{
+  display:inline-flex;
+  gap:6px;
+  margin:0 12px;
+}
+.terrain-selector-wrap .mini-btn{
+  font-size:0.7rem;
+  padding:4px 10px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.2);
+  color:var(--muted);
+  cursor:pointer;
+  border-radius:6px;
+  transition:all 0.2s ease;
+  user-select:none;
+}
+.terrain-selector-wrap .mini-btn:hover{
+  background:rgba(255,255,255,0.12);
+  color:#fff;
+}
+.terrain-selector-wrap .mini-btn.active{
+  background:rgba(79,209,255,0.22);
+  border-color:var(--cyan);
+  color:#fff;
+  box-shadow:0 0 10px rgba(79,209,255,0.45);
+}

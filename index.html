@@ -222,6 +222,10 @@
   <div class="surface-topbar panel">
     <button class="icon-btn" id="btn-exit-surface" title="Return to orbit">⬆️</button>
     <div class="surface-location" id="surface-location-label">Martian Surface</div>
+    <div class="terrain-selector-wrap">
+      <button class="mini-btn active" id="btn-map-jezero" title="Jezero Crater">🌋 Jezero</button>
+      <button class="mini-btn" id="btn-map-mountsharp" title="NASA HiRISE Mount Sharp (Aeolis Mons)">🏔️ Mount Sharp</button>
+    </div>
     <div class="surface-hint">Click for FPS aim · WASD to move · SPACE to jump · ESC to release · H for log</div>
   </div>
   <div class="surface-crosshair">+</div>
@@ -248,6 +252,7 @@
 <!-- APP SCRIPTS (order matters) -->
 <script src="js/utils.js"></script>
 <script src="js/data.js"></script>
+<script src="js/maps/mount_sharp.js"></script>
 <script src="js/textures.js"></script>
 <script src="js/scene.js"></script>
 <script src="js/surface.js"></script>

@@ -40,14 +40,67 @@ let storyTargetMesh = null;
 let storyTargetGlow = null;
 let storyTargetCollected = false;
 
-/* -------------------- Terrain height generation (deterministic) -------------------- */
+let currentTerrainMode = 'jezero'; // 'jezero' or 'mount_sharp'
+
+/* -------------------- Bilinear interpolation for pre-baked terrain -------------------- */
+function getPrebakedHeight(x, z, mapMatrix){
+  if (!mapMatrix || !mapMatrix.length) return 0;
+  const res = mapMatrix.length;
+  const normX = Math.max(0, Math.min(1, (x + SURFACE_SIZE / 2) / SURFACE_SIZE));
+  const normZ = Math.max(0, Math.min(1, (z + SURFACE_SIZE / 2) / SURFACE_SIZE));
+
+  const gridX = normX * (res - 1);
+  const gridZ = normZ * (res - 1);
+
+  const x0 = Math.floor(gridX), x1 = Math.min(res - 1, x0 + 1);
+  const z0 = Math.floor(gridZ), z1 = Math.min(res - 1, z0 + 1);
+
+  const tx = gridX - x0;
+  const tz = gridZ - z0;
+
+  const h00 = mapMatrix[z0][x0];
+  const h10 = mapMatrix[z0][x1];
+  const h01 = mapMatrix[z1][x0];
+  const h11 = mapMatrix[z1][x1];
+
+  const hTop = h00 * (1 - tx) + h10 * tx;
+  const hBottom = h01 * (1 - tx) + h11 * tx;
+
+  return hTop * (1 - tz) + hBottom * tz;
+}
+
+/* -------------------- Terrain height generation -------------------- */
 function terrainHeight(x, z, seed){
   const dist = Math.sqrt(x*x + z*z);
   const falloff = Math.min(1, Math.max(0, (dist - 14) / 40));
+
+  // Pre-baked real NASA HiRISE Mount Sharp Digital Elevation Model
+  if (currentTerrainMode === 'mount_sharp' && window.TERRAIN_PRESET_MOUNT_SHARP){
+    const baseH = getPrebakedHeight(x, z, window.TERRAIN_PRESET_MOUNT_SHARP);
+    const micro = (fractalNoise(x * 1.5, z * 1.5, 3, 10, seed || 1) - 0.5) * 1.5;
+    return (baseH + micro) * falloff;
+  }
+
+  // Default Jezero Crater procedural relief
   const n1 = fractalNoise(x + seed*131, z + seed*197, 5, 22, seed);
   const n2 = fractalNoise(x*0.3 + seed*71, z*0.3 + seed*29, 3, 46, seed+17);
   const h = (n1 - 0.5) * 7 + (n2 - 0.5) * 3;
   return h * falloff;
+}
+
+function setTerrainMode(mode){
+  if (currentTerrainMode === mode) return;
+  currentTerrainMode = mode;
+  const btnJezero = document.getElementById('btn-map-jezero');
+  const btnSharp = document.getElementById('btn-map-mountsharp');
+  if (btnJezero) btnJezero.classList.toggle('active', mode === 'jezero');
+  if (btnSharp) btnSharp.classList.toggle('active', mode === 'mount_sharp');
+
+  if (surfaceScene && surfaceInitialized){
+    buildSurfaceWorld(currentSurfaceSeed);
+    if (appState === 'story') spawnStoryTarget(currentSurfaceSeed);
+    addLog(`🗺️ Terreno alterado: ${mode === 'mount_sharp' ? 'Mount Sharp (NASA HiRISE DTM)' : 'Jezero Crater'}`);
+  }
 }
 
 /* -------------------- Ground color texture (close-up) -------------------- */
@@ -766,6 +819,11 @@ function attachSurfaceControls(){
   bindHoldButton('surf-btn-back', 'KeyS');
   bindHoldButton('surf-btn-left', 'KeyA');
   bindHoldButton('surf-btn-right', 'KeyD');
+
+  const btnJezero = document.getElementById('btn-map-jezero');
+  const btnSharp = document.getElementById('btn-map-mountsharp');
+  if (btnJezero) btnJezero.addEventListener('click', () => setTerrainMode('jezero'));
+  if (btnSharp) btnSharp.addEventListener('click', () => setTerrainMode('mount_sharp'));
 }
 
 /* -------------------- Free surface mode entry/exit helpers -------------------- */
