@@ -812,8 +812,17 @@ function updateRoverMovement(dt){
   // Steer rover heading
   if (turnInput !== 0){
     roverHeading += turnInput * ROVER_TURN_SPEED * dt;
-    // Keep third person camera smoothly tracking behind the rover
-    surfaceYaw = roverHeading;
+    // Keep camera smoothly trailing the rover during keyboard turns
+    let yawDiff = roverHeading - surfaceYaw;
+    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+    surfaceYaw += yawDiff * Math.min(1, 4.0 * dt);
+  } else if (throttleInput !== 0){
+    // When driving forward/backward, gently align rover heading towards camera view smoothly
+    let headingDiff = surfaceYaw - roverHeading;
+    while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
+    while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
+    roverHeading += headingDiff * Math.min(1, 3.5 * dt);
   }
 
   // Smooth acceleration / deceleration
