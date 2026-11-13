@@ -910,7 +910,8 @@ function updateRoverMovement(dt){
 
     const camX = surfacePos.x - Math.sin(surfaceYaw) * camDist * Math.cos(surfacePitch);
     const camZ = surfacePos.z - Math.cos(surfaceYaw) * camDist * Math.cos(surfacePitch);
-    const camY = hCenter + camHeight + Math.sin(surfacePitch) * camDist;
+    // When looking up (surfacePitch > 0), camera lowers; looking down, camera elevates
+    const camY = hCenter + camHeight - Math.sin(surfacePitch) * camDist;
 
     // Ensure camera stays above terrain
     const minCamY = terrainHeight(camX, camZ, currentSurfaceSeed) + 0.9;
