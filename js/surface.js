@@ -7,11 +7,12 @@
 
 const SURFACE_SIZE = 220;
 const SURFACE_EYE_HEIGHT = 1.8;
-const SURFACE_MOVE_SPEED = 9;
+const ROVER_MOVE_SPEED = 7.5; // Mars rover cruising speed in m/s
+const ROVER_TURN_SPEED = 1.6; // Turn rate in rad/s
 
 let surfaceScene, surfaceCamera;
 let surfaceTerrainMesh = null, surfaceSkyMesh = null, surfaceRocksGroup = null, surfaceSunSprite = null;
-let surfaceLanderMesh = null, gltfLoaderInstance = null;
+let surfaceLanderMesh = null, surfaceRoverMesh = null, gltfLoaderInstance = null;
 let surfaceRocksData = [];
 let martianRockMaterialsCache = null;
 let surfaceInitialized = false;
@@ -19,16 +20,26 @@ let currentSurfaceSeed = 1;
 
 let surfacePos = new THREE.Vector3(0, 0, 0);
 let surfaceYaw = Math.PI;
-let surfacePitch = -0.06;
+let surfacePitch = 0.12; // Gentle downward angle to view rover & horizon
 let keysDown = {};
 let playerJumpOffset = 0;
 let playerVelocityY = 0;
 let playerIsGrounded = true;
 const MARS_GRAVITY = 10.5;
 const JUMP_VELOCITY = 5.4;
-const LANDER_POS = { x: 0, z: 2.8 };
+const LANDER_POS = { x: 0, z: 4.8 };
 let surfaceDrag = { active:false, lastX:0, lastY:0 };
 let lastSurfaceTime = performance.now();
+
+// Rover Vehicle State
+let roverHeading = Math.PI; // World yaw of rover (radians)
+let roverSpeed = 0; // Current linear speed (m/s)
+let roverPitch = 0; // Terrain slope pitch
+let roverRoll = 0; // Terrain slope roll
+let roverWheelAngle = 0; // Wheel rotation angle for animated rolling
+let roverCameraMode = 'third_person'; // 'third_person' or 'first_person'
+let roverWheelNodes = []; // Cached wheel meshes for rotation
+let roverGroup = null; // Container group for the Perseverance rover model
 
 let isHoveringLander = false;
 const landerRaycaster = new THREE.Raycaster();
@@ -373,12 +384,175 @@ function buildSurfaceWorld(seed){
   // Spawn official NASA Apollo Lunar Module at initial landing site
   spawnLander(surfaceScene, seed);
 
+  // Initialize and spawn Perseverance Rover character
+  spawnRover(surfaceScene, seed);
+
   surfacePos.set(0, 0, 0);
   surfaceYaw = Math.PI;
-  surfacePitch = -0.06;
+  surfacePitch = 0.12;
+  roverHeading = Math.PI;
+  roverSpeed = 0;
+  roverPitch = 0;
+  roverRoll = 0;
+  roverWheelAngle = 0;
   playerJumpOffset = 0;
   playerVelocityY = 0;
   playerIsGrounded = true;
+}
+
+/* -------------------- Official NASA Perseverance Rover Character -------------------- */
+function buildProceduralPerseveranceRover(){
+  const group = new THREE.Group();
+
+  const whiteChassisMat = new THREE.MeshStandardMaterial({
+    color: 0xdedede, metalness: 0.25, roughness: 0.45
+  });
+  const darkMetalMat = new THREE.MeshStandardMaterial({
+    color: 0x22252a, metalness: 0.8, roughness: 0.35
+  });
+  const goldFoilMat = new THREE.MeshStandardMaterial({
+    color: 0xd4af37, metalness: 0.85, roughness: 0.25
+  });
+  const wheelMat = new THREE.MeshStandardMaterial({
+    color: 0x33373d, metalness: 0.7, roughness: 0.5
+  });
+
+  // Main Rover Body / Equipment Deck
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.65, 2.3), whiteChassisMat);
+  body.position.y = 1.05;
+  group.add(body);
+
+  // Thermal Gold Foil Compartments
+  const goldBox = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.8), goldFoilMat);
+  goldBox.position.set(0.3, 1.45, -0.2);
+  group.add(goldBox);
+
+  // RTG (Radioisotope Thermoelectric Generator at the rear)
+  const rtg = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.85, 12), darkMetalMat);
+  rtg.rotation.x = Math.PI / 2;
+  rtg.position.set(0, 1.15, -1.45);
+  group.add(rtg);
+
+  // Remote Sensing Mast (SuperCam / Mastcam-Z)
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 1.15, 8), whiteChassisMat);
+  mast.position.set(-0.48, 1.85, 0.7);
+  group.add(mast);
+
+  // Camera Head
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.22, 0.28), whiteChassisMat);
+  head.position.set(-0.48, 2.45, 0.7);
+  group.add(head);
+
+  // Twin Mastcam lenses
+  for (let s of [-0.1, 0.1]){
+    const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.1, 12), darkMetalMat);
+    lens.rotation.x = Math.PI / 2;
+    lens.position.set(-0.48 + s, 2.45, 0.86);
+    group.add(lens);
+  }
+
+  // Robotic Arm folded at front
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.9, 8), darkMetalMat);
+  arm.rotation.z = Math.PI / 4;
+  arm.position.set(0.45, 0.85, 1.15);
+  group.add(arm);
+
+  // 6 All-terrain Aluminum Wheels with cleat grousers
+  const wheelOffsets = [
+    { x: -1.05, y: 0.38, z: 0.95 },
+    { x:  1.05, y: 0.38, z: 0.95 },
+    { x: -1.15, y: 0.38, z: 0.0 },
+    { x:  1.15, y: 0.38, z: 0.0 },
+    { x: -1.05, y: 0.38, z: -0.95 },
+    { x:  1.05, y: 0.38, z: -0.95 }
+  ];
+
+  wheelOffsets.forEach((pos)=>{
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.3, 16), wheelMat);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(pos.x, pos.y, pos.z);
+    wheel.isProceduralWheel = true;
+    group.add(wheel);
+  });
+
+  // Rocker-bogie titanium suspension tubes
+  const strutL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.8, 8), darkMetalMat);
+  strutL.rotation.x = Math.PI / 2;
+  strutL.position.set(-0.95, 0.55, 0);
+  group.add(strutL);
+
+  const strutR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.8, 8), darkMetalMat);
+  strutR.rotation.x = Math.PI / 2;
+  strutR.position.set(0.95, 0.55, 0);
+  group.add(strutR);
+
+  // High-Gain Dish Antenna
+  const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.04, 0.06, 16), whiteChassisMat);
+  dish.rotation.x = 0.4;
+  dish.position.set(0.45, 1.48, -0.7);
+  group.add(dish);
+
+  return group;
+}
+
+function loadRoverModel(onLoad){
+  if (surfaceRoverMesh){
+    onLoad(surfaceRoverMesh.clone());
+    return;
+  }
+  if (!window.THREE || !THREE.GLTFLoader){
+    console.warn('GLTFLoader not available');
+    return;
+  }
+  if (!gltfLoaderInstance) gltfLoaderInstance = new THREE.GLTFLoader();
+
+  gltfLoaderInstance.load('assets/models/perseverance.glb', (gltf)=>{
+    const model = gltf.scene;
+    roverWheelNodes = [];
+
+    model.traverse((child)=>{
+      if (child.isMesh){
+        child.castShadow = true;
+        child.receiveShadow = true;
+        if (child.material){
+          child.material.roughness = Math.max(0.2, child.material.roughness || 0.5);
+        }
+      }
+      // Detect wheel nodes for driving animation
+      if (child.name && (child.name.toLowerCase().includes('wheel') || child.name.toLowerCase().includes('tire'))){
+        roverWheelNodes.push(child);
+      }
+    });
+
+    surfaceRoverMesh = model;
+    onLoad(model.clone());
+  }, undefined, (err)=>{
+    console.warn('Could not load perseverance rover GLB asset:', err);
+  });
+}
+
+function spawnRover(scene, seed){
+  if (roverGroup && roverGroup.parent){
+    roverGroup.parent.remove(roverGroup);
+  }
+
+  roverGroup = new THREE.Group();
+  roverWheelNodes = [];
+
+  // Procedural rover fallback immediately visible with zero latency
+  const procRover = buildProceduralPerseveranceRover();
+  roverGroup.add(procRover);
+  scene.add(roverGroup);
+
+  // Attempt seamless upgrade to official NASA Perseverance 3D GLB Model
+  loadRoverModel((glbInstance)=>{
+    if (roverGroup.children.includes(procRover)){
+      roverGroup.remove(procRover);
+      roverGroup.add(glbInstance);
+    }
+  });
+
+  window.roverGroup = roverGroup;
 }
 
 /* -------------------- Official NASA Lander Asset & Procedural Fallback -------------------- */
@@ -630,77 +804,143 @@ function checkLanderHover(){
   }
 }
 
-/* -------------------- Surface movement / camera -------------------- */
-function updateSurfaceMovement(dt){
-  const forward = new THREE.Vector3(Math.sin(surfaceYaw), 0, Math.cos(surfaceYaw));
-  const right = new THREE.Vector3(Math.sin(surfaceYaw + Math.PI/2), 0, Math.cos(surfaceYaw + Math.PI/2));
-  const move = new THREE.Vector3();
+/* -------------------- Rover Movement, Physics & 3D Camera System -------------------- */
+function updateRoverMovement(dt){
+  const turnInput = (keysDown['KeyA'] || keysDown['ArrowLeft'] ? 1 : 0) - (keysDown['KeyD'] || keysDown['ArrowRight'] ? 1 : 0);
+  const throttleInput = (keysDown['KeyW'] || keysDown['ArrowUp'] ? 1 : 0) - (keysDown['KeyS'] || keysDown['ArrowDown'] ? 1 : 0);
 
-  if (keysDown['KeyW'] || keysDown['ArrowUp']) move.add(forward);
-  if (keysDown['KeyS'] || keysDown['ArrowDown']) move.sub(forward);
-  if (keysDown['KeyA'] || keysDown['ArrowLeft']) move.add(right);
-  if (keysDown['KeyD'] || keysDown['ArrowRight']) move.sub(right);
+  // Steer rover heading
+  if (turnInput !== 0){
+    roverHeading += turnInput * ROVER_TURN_SPEED * dt;
+    // Keep third person camera smoothly tracking behind the rover
+    surfaceYaw = roverHeading;
+  }
 
-  if (move.lengthSq() > 0){
-    move.normalize().multiplyScalar(SURFACE_MOVE_SPEED * dt);
+  // Smooth acceleration / deceleration
+  const targetSpeed = throttleInput * ROVER_MOVE_SPEED;
+  const accel = throttleInput !== 0 ? 9.0 : 14.0;
+  roverSpeed += (targetSpeed - roverSpeed) * Math.min(1, accel * dt);
 
-    let targetX = surfacePos.x + move.x;
-    let targetZ = surfacePos.z + move.z;
-    const playerRadius = 0.65; // Astronaut EVA suit collision radius
+  // Animate wheels rolling when rover is in motion
+  if (Math.abs(roverSpeed) > 0.01){
+    const wheelRotDelta = (roverSpeed * dt) / 0.32; // wheel radius = ~0.32m
+    roverWheelAngle += wheelRotDelta;
 
-    // 2-pass circle-circle collision resolution for smooth sliding along rocks
+    if (roverGroup){
+      roverGroup.traverse((child)=>{
+        if (child.isProceduralWheel){
+          child.rotation.x = roverWheelAngle;
+        }
+      });
+    }
+  }
+
+  // Linear displacement along current heading
+  if (Math.abs(roverSpeed) > 0.001){
+    // In our coordinate space: forward is along sin(heading), cos(heading)
+    const moveX = Math.sin(roverHeading) * roverSpeed * dt;
+    const moveZ = Math.cos(roverHeading) * roverSpeed * dt;
+
+    let targetX = surfacePos.x + moveX;
+    let targetZ = surfacePos.z + moveZ;
+    const roverCollisionRadius = 1.6; // Physical clearance radius for Perseverance rover
+
+    // 2-pass obstacle collision resolution against boulders
     for (let pass = 0; pass < 2; pass++){
       for (let i = 0; i < surfaceRocksData.length; i++){
         const rock = surfaceRocksData[i];
         const dx = targetX - rock.x;
         const dz = targetZ - rock.z;
-        const minDist = rock.radius + playerRadius;
+        const minDist = rock.radius + roverCollisionRadius;
         const distSq = dx*dx + dz*dz;
         if (distSq < minDist * minDist && distSq > 0.00001){
           const dist = Math.sqrt(distSq);
           const overlap = minDist - dist;
           targetX += (dx / dist) * overlap;
           targetZ += (dz / dist) * overlap;
+          // Dampen speed on impact
+          roverSpeed *= 0.85;
         }
       }
     }
 
-    const half = SURFACE_SIZE/2 - 4;
+    const half = SURFACE_SIZE/2 - 5;
     surfacePos.x = Math.max(-half, Math.min(half, targetX));
     surfacePos.z = Math.max(-half, Math.min(half, targetZ));
   }
 
-  // Jump physics with Martian low gravity
-  if (keysDown['Space'] && playerIsGrounded){
-    playerVelocityY = JUMP_VELOCITY;
-    playerIsGrounded = false;
-  }
-  if (!playerIsGrounded){
-    playerJumpOffset += playerVelocityY * dt;
-    playerVelocityY -= MARS_GRAVITY * dt;
-    if (playerJumpOffset <= 0){
-      playerJumpOffset = 0;
-      playerVelocityY = 0;
-      playerIsGrounded = true;
-    }
+  // Sample terrain elevation and normal slope for 3D chassis orientation
+  const sampleDist = 1.3;
+  const fx = surfacePos.x + Math.sin(roverHeading) * sampleDist;
+  const fz = surfacePos.z + Math.cos(roverHeading) * sampleDist;
+  const bx = surfacePos.x - Math.sin(roverHeading) * sampleDist;
+  const bz = surfacePos.z - Math.cos(roverHeading) * sampleDist;
+
+  const rx = surfacePos.x + Math.cos(roverHeading) * sampleDist;
+  const rz = surfacePos.z - Math.sin(roverHeading) * sampleDist;
+  const lx = surfacePos.x - Math.cos(roverHeading) * sampleDist;
+  const lz = surfacePos.z + Math.sin(roverHeading) * sampleDist;
+
+  const hCenter = terrainHeight(surfacePos.x, surfacePos.z, currentSurfaceSeed);
+  const hFront = terrainHeight(fx, fz, currentSurfaceSeed);
+  const hBack = terrainHeight(bx, bz, currentSurfaceSeed);
+  const hRight = terrainHeight(rx, rz, currentSurfaceSeed);
+  const hLeft = terrainHeight(lx, lz, currentSurfaceSeed);
+
+  // Pitch & roll smoothing
+  const targetPitch = Math.atan2(hFront - hBack, sampleDist * 2);
+  const targetRoll = Math.atan2(hLeft - hRight, sampleDist * 2);
+  roverPitch += (targetPitch - roverPitch) * Math.min(1, 10 * dt);
+  roverRoll += (targetRoll - roverRoll) * Math.min(1, 10 * dt);
+
+  // Position and orient 3D Perseverance Rover
+  if (roverGroup){
+    roverGroup.position.set(surfacePos.x, hCenter, surfacePos.z);
+    roverGroup.rotation.order = 'YXZ';
+    roverGroup.rotation.y = roverHeading;
+    roverGroup.rotation.x = roverPitch;
+    roverGroup.rotation.z = roverRoll;
   }
 
-  const groundY = terrainHeight(surfacePos.x, surfacePos.z, currentSurfaceSeed);
-  surfaceCamera.position.set(surfacePos.x, groundY + SURFACE_EYE_HEIGHT + playerJumpOffset, surfacePos.z);
+  // 3D Camera tracking
+  if (roverCameraMode === 'third_person'){
+    // Chase camera behind the rover
+    const camDist = 6.8;
+    const camHeight = 3.2;
 
-  const dir = new THREE.Vector3(
-    Math.sin(surfaceYaw) * Math.cos(surfacePitch),
-    Math.sin(surfacePitch),
-    Math.cos(surfaceYaw) * Math.cos(surfacePitch)
-  );
-  surfaceCamera.lookAt(surfaceCamera.position.clone().add(dir));
+    const camX = surfacePos.x - Math.sin(surfaceYaw) * camDist * Math.cos(surfacePitch);
+    const camZ = surfacePos.z - Math.cos(surfaceYaw) * camDist * Math.cos(surfacePitch);
+    const camY = hCenter + camHeight + Math.sin(surfacePitch) * camDist;
+
+    // Ensure camera stays above terrain
+    const minCamY = terrainHeight(camX, camZ, currentSurfaceSeed) + 0.9;
+    surfaceCamera.position.set(camX, Math.max(minCamY, camY), camZ);
+
+    // Look at rover deck / mastcam target point
+    const lookTarget = new THREE.Vector3(surfacePos.x, hCenter + 1.4, surfacePos.z);
+    surfaceCamera.lookAt(lookTarget);
+  } else {
+    // First-person Mastcam-Z cockpit view
+    const mastcamY = hCenter + 2.2;
+    surfaceCamera.position.set(
+      surfacePos.x + Math.sin(roverHeading) * 0.4,
+      mastcamY,
+      surfacePos.z + Math.cos(roverHeading) * 0.4
+    );
+    const dir = new THREE.Vector3(
+      Math.sin(surfaceYaw) * Math.cos(surfacePitch),
+      Math.sin(surfacePitch),
+      Math.cos(surfaceYaw) * Math.cos(surfacePitch)
+    );
+    surfaceCamera.lookAt(surfaceCamera.position.clone().add(dir));
+  }
 }
 
 function renderSurfaceFrame(){
   const now = performance.now();
   const dt = Math.min(0.1, (now - lastSurfaceTime)/1000);
   lastSurfaceTime = now;
-  if (!missionComplete) updateSurfaceMovement(dt);
+  if (!missionComplete) updateRoverMovement(dt);
   updateStoryTargetCheck();
   checkLanderHover();
   if (window.NavigationGuide) NavigationGuide.update(dt);
@@ -745,6 +985,14 @@ function attachSurfaceControls(){
     if (e.code === 'KeyM' || e.key === 'm' || e.key === 'M'){
       e.preventDefault();
       setTerrainMode(currentTerrainMode === 'jezero' ? 'mount_sharp' : 'jezero');
+      return;
+    }
+
+    // Press C or V to switch camera view between 3rd-person Chase and 1st-person Mastcam
+    if (e.code === 'KeyC' || e.key === 'c' || e.key === 'C' || e.code === 'KeyV' || e.key === 'v' || e.key === 'V'){
+      e.preventDefault();
+      roverCameraMode = roverCameraMode === 'third_person' ? 'first_person' : 'third_person';
+      addLog(`🎥 Camera Mode: ${roverCameraMode === 'third_person' ? '3rd-Person Chase View' : '1st-Person Mastcam-Z Cockpit'}`);
       return;
     }
 
@@ -831,6 +1079,16 @@ function attachSurfaceControls(){
   document.querySelectorAll('.map-btn-mountsharp').forEach(btn => {
     btn.addEventListener('click', (e) => { e.stopPropagation(); setTerrainMode('mount_sharp'); });
   });
+
+  const camToggleBtn = document.getElementById('story-btn-cam-toggle');
+  if (camToggleBtn){
+    camToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      roverCameraMode = roverCameraMode === 'third_person' ? 'first_person' : 'third_person';
+      camToggleBtn.textContent = roverCameraMode === 'third_person' ? '🎥 View: 3rd Person' : '🎥 View: 1st Person';
+      addLog(`🎥 Camera Mode: ${roverCameraMode === 'third_person' ? '3rd-Person Chase View' : '1st-Person Mastcam-Z Cockpit'}`);
+    });
+  }
 }
 
 /* -------------------- Free surface mode entry/exit helpers -------------------- */

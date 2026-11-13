@@ -391,8 +391,8 @@ function triggerFpsMissionIntro(wp, index){
 
   const lines = [
     { el: lineLoc, text: `LOCATION // JEZERO CRATER, MARS [${wp.lat.toFixed(2)}°N, ${wp.lon.toFixed(2)}°E]`, speed: 14 },
-    { el: lineSite, text: `SITE // ${wp.name.toUpperCase()} (SOL 1350)`, speed: 14 },
-    { el: lineTele, text: `ELEVATION // ${wp.elevation}M · EVA SUIT ACTIVE`, speed: 14 },
+    { el: lineSite, text: `ROVER // PERSEVERANCE (MARS 2020) · ${wp.name.toUpperCase()}`, speed: 14 },
+    { el: lineTele, text: `ELEVATION // ${wp.elevation}M · AUTONOMOUS NAVIGATION ACTIVE`, speed: 14 },
     { el: lineDir, text: `DIRECTIVE // ${wp.objective}`, speed: 15 }
   ];
 
