@@ -91,10 +91,8 @@ function terrainHeight(x, z, seed){
 function setTerrainMode(mode){
   if (currentTerrainMode === mode) return;
   currentTerrainMode = mode;
-  const btnJezero = document.getElementById('btn-map-jezero');
-  const btnSharp = document.getElementById('btn-map-mountsharp');
-  if (btnJezero) btnJezero.classList.toggle('active', mode === 'jezero');
-  if (btnSharp) btnSharp.classList.toggle('active', mode === 'mount_sharp');
+  document.querySelectorAll('.map-btn-jezero').forEach(b => b.classList.toggle('active', mode === 'jezero'));
+  document.querySelectorAll('.map-btn-mountsharp').forEach(b => b.classList.toggle('active', mode === 'mount_sharp'));
 
   if (surfaceScene && surfaceInitialized){
     buildSurfaceWorld(currentSurfaceSeed);
@@ -743,6 +741,13 @@ function attachSurfaceControls(){
       return;
     }
 
+    // Press M to cycle terrain map preset (Jezero <-> Mount Sharp)
+    if (e.code === 'KeyM' || e.key === 'm' || e.key === 'M'){
+      e.preventDefault();
+      setTerrainMode(currentTerrainMode === 'jezero' ? 'mount_sharp' : 'jezero');
+      return;
+    }
+
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','Space'].includes(e.code)) e.preventDefault();
     keysDown[e.code] = true;
 
@@ -820,10 +825,12 @@ function attachSurfaceControls(){
   bindHoldButton('surf-btn-left', 'KeyA');
   bindHoldButton('surf-btn-right', 'KeyD');
 
-  const btnJezero = document.getElementById('btn-map-jezero');
-  const btnSharp = document.getElementById('btn-map-mountsharp');
-  if (btnJezero) btnJezero.addEventListener('click', () => setTerrainMode('jezero'));
-  if (btnSharp) btnSharp.addEventListener('click', () => setTerrainMode('mount_sharp'));
+  document.querySelectorAll('.map-btn-jezero').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); setTerrainMode('jezero'); });
+  });
+  document.querySelectorAll('.map-btn-mountsharp').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); setTerrainMode('mount_sharp'); });
+  });
 }
 
 /* -------------------- Free surface mode entry/exit helpers -------------------- */

@@ -134,6 +134,10 @@
 <div id="story-panel">
   <div class="story-top-bar panel">
     <button class="icon-btn" id="btn-exit-story" title="Exit mission mode">✕</button>
+    <div class="terrain-selector-wrap">
+      <button class="mini-btn active map-btn-jezero" id="story-map-jezero" title="Jezero Crater">🌋 Jezero</button>
+      <button class="mini-btn map-btn-mountsharp" id="story-map-mountsharp" title="NASA HiRISE Mount Sharp (Shortcut: M)">🏔️ Mount Sharp</button>
+    </div>
     <div class="story-dots" id="story-dots"></div>
     <div class="story-o2-gauge">
       <span>SUIT O₂</span>
@@ -223,10 +227,10 @@
     <button class="icon-btn" id="btn-exit-surface" title="Return to orbit">⬆️</button>
     <div class="surface-location" id="surface-location-label">Martian Surface</div>
     <div class="terrain-selector-wrap">
-      <button class="mini-btn active" id="btn-map-jezero" title="Jezero Crater">🌋 Jezero</button>
-      <button class="mini-btn" id="btn-map-mountsharp" title="NASA HiRISE Mount Sharp (Aeolis Mons)">🏔️ Mount Sharp</button>
+      <button class="mini-btn active map-btn-jezero" id="btn-map-jezero" title="Jezero Crater">🌋 Jezero</button>
+      <button class="mini-btn map-btn-mountsharp" id="btn-map-mountsharp" title="NASA HiRISE Mount Sharp (Shortcut: M)">🏔️ Mount Sharp</button>
     </div>
-    <div class="surface-hint">Click for FPS aim · WASD to move · SPACE to jump · ESC to release · H for log</div>
+    <div class="surface-hint">Click for FPS aim · WASD to move · SPACE to jump · M for map · ESC to release · H for log</div>
   </div>
   <div class="surface-crosshair">+</div>
   <div id="lander-interact-prompt" class="interact-prompt" title="Board spacecraft and return to orbit/menu">
